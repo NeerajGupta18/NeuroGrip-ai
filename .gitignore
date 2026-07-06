@@ -1,0 +1,6 @@
+**/__pycache__/
+**/*.pyc
+backend/profiles/*.json
+frontend/node_modules/
+frontend/dist/
+.env
