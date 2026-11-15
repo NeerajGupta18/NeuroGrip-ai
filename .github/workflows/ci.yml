@@ -10,6 +10,18 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neurogrip
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/neurogrip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,3 +45,17 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image
+        run: docker build -t neurogrip-ai .
+      - name: Start it and check the API and the dashboard
+        run: |
+          docker run -d --name app -p 10000:10000 neurogrip-ai
+          for i in $(seq 1 30); do curl -fs localhost:10000/api/health && break || sleep 1; done
+          curl -fs localhost:10000/api/health | grep -q '"status":"ok"'
+          curl -fs localhost:10000/ | grep -q "NeuroGrip AI"
+          curl -fs -X POST localhost:10000/api/calibrate -H 'Content-Type: application/json' -d '{"user_id":"smoke","reps":1}' | grep -q '"calibrated_grasps":6'

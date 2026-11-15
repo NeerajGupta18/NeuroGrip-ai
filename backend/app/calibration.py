@@ -42,6 +42,8 @@ def _fresh_queue(source: str, seed: str) -> list:
 def create_profile(user_id: str, source: str | None = None) -> dict:
     user_id = store.safe_id(user_id)
     source = source if source in SOURCES else _default_source(user_id)
+    if store.get(user_id) is None:
+        store.make_room()
     profile = {
         "user_id": user_id,
         "source": source,

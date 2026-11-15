@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from . import calibration
+from . import calibration, store
 from .agent import CONFIDENCE_FLOOR, feature_table, run_agent
 from .dataset import SOURCE_LABELS, SOURCES, get_recording, load_evaluation, load_model
 from .faults import FAULT_TYPES, inject_fault
@@ -25,10 +26,24 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Comma-separated list of allowed frontend origins; "*" only for local development.
-origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
-                   allow_headers=["Content-Type"])
+# Cross-origin access is only needed when the dashboard is served from a different origin
+# (local development: Vite on :5173, API on :8123). In the hosted build the API serves the
+# dashboard itself, so ALLOWED_ORIGINS is left empty and no other site may call the API.
+origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
+if origins:
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
+                       allow_headers=["Content-Type"])
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 def _to_array(ch1: list, ch2: list) -> np.ndarray:
@@ -68,7 +83,7 @@ def _predict_response(result: dict, latency_ms: float) -> PredictResponse:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": app.version}
+    return {"status": "ok", "version": app.version, "profile_store": store.backend()}
 
 
 @app.get("/api/meta")
@@ -189,3 +204,12 @@ def report(user_id: str):
         **summary, generated_at=datetime.now(timezone.utc).isoformat(),
         expected_accuracy_by_reps={reps: v["recording"] for reps, v in curve.items()},
     )
+
+
+# Hosted build: serve the compiled dashboard from the same origin as the API. Registered last,
+# so every /api route above takes precedence. Absent in local development (Vite serves it).
+FRONTEND_DIST = os.environ.get(
+    "FRONTEND_DIST", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "dist")
+)
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="dashboard")

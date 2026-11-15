@@ -74,13 +74,14 @@ backend/
 │   ├── calibration.py   per-wearer profiles, test-then-train accuracy
 │   ├── agent.py         LangGraph decision graph with abstain branches
 │   ├── dataset.py       model artifacts + replayed recordings
-│   ├── store.py         profile storage
+│   ├── store.py         profile storage (Postgres or JSON files)
 │   └── main.py          FastAPI routes
 ├── training/train.py    trains, evaluates, writes artifacts + docs/EVALUATION.md
-├── tests/               26 tests: maths, safety gate, API end to end
+├── tests/               maths, safety gate, storage, API end to end
 └── data/recordings.npz  the recordings the dashboard replays
 frontend/                React + Vite dashboard
 docs/EVALUATION.md       every number, and what it does not show
+Dockerfile, render.yaml  production image and Render Blueprint
 ```
 
 ## Run it
@@ -117,7 +118,27 @@ cd backend
 python -m training.train --raw /path/to/unzipped --baselines
 ```
 
-Optional environment variables: `ALLOWED_ORIGINS` (comma-separated frontend origins for CORS), `PROFILES_DIR`, `GROQ_API_KEY` (LLM re-wording of explanations).
+## Deploy
+
+The repo ships a `Dockerfile` (builds the dashboard, then serves it from the API on one origin) and a Render Blueprint, `render.yaml`:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/NeerajGupta18/NeuroGrip-ai)
+
+Or run the same image anywhere:
+
+```bash
+docker build -t neurogrip-ai .
+docker run -p 10000:10000 neurogrip-ai      # http://localhost:10000
+```
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string. Set it to keep wearer profiles across restarts; without it they are JSON files on local disk. |
+| `ALLOWED_ORIGINS` | Comma-separated origins allowed to call the API cross-origin. Empty in the hosted build, where the dashboard and API share an origin. |
+| `GROQ_API_KEY` | Optional. Lets an LLM re-word the computed explanations. |
+| `MAX_PROFILES` | Cap on stored profiles (default 500); the oldest are dropped. |
+
+CI runs the tests against both storage backends, builds the dashboard, builds the image and smoke-tests it on every push.
 
 ## Try this in the dashboard
 

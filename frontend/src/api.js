@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8123";
+// Hosted build: the API serves this dashboard, so requests go to the same origin ("").
+// Local development: set VITE_API_BASE in .env to the API's address.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 async function request(path, options) {
   const res = await fetch(`${API_BASE}${path}`, {

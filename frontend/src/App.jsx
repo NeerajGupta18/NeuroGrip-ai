@@ -20,7 +20,20 @@ import {
   sendFeedback,
 } from "./api.js";
 
-const DEFAULT_USER = "demo_user";
+// Every browser gets its own profile, so one visitor's calibration never leaks into another's.
+function browserProfileId() {
+  const fresh = `guest-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const saved = window.localStorage.getItem("neurogrip-profile");
+    if (saved) return saved;
+    window.localStorage.setItem("neurogrip-profile", fresh);
+  } catch {
+    // storage unavailable (private mode, embedded preview): a per-visit id is fine
+  }
+  return fresh;
+}
+
+const DEFAULT_USER = browserProfileId();
 const FAULT_LABELS = { dropout: "Electrode dropout", spike: "Amplitude spike", hum: "50 Hz mains hum" };
 
 export default function App() {
@@ -28,6 +41,7 @@ export default function App() {
   const [evaluation, setEvaluation] = useState(null);
   const [userId, setUserId] = useState(DEFAULT_USER);
   const [users, setUsers] = useState([]);
+  const [known, setKnown] = useState([DEFAULT_USER]); // profiles this browser has opened
   const [recording, setRecording] = useState(null);
   const [fault, setFault] = useState(null);
   const [prediction, setPrediction] = useState(null);
@@ -68,6 +82,7 @@ export default function App() {
   const refresh = useCallback(async (forUser) => {
     try {
       setProfile(await getProfile(forUser)); // creates the profile on first use
+      setKnown((ids) => (ids.includes(forUser) ? ids : [...ids, forUser]));
       setUsers((await listUsers()).users);
     } catch (err) {
       fail(err);
@@ -154,7 +169,7 @@ export default function App() {
       )}
 
       <UserSwitcher
-        users={users}
+        users={users.filter((u) => known.includes(u.user_id))}
         activeUser={userId}
         sources={meta?.sources || []}
         sourceLabels={sourceLabels}
