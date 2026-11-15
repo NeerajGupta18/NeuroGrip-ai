@@ -6,6 +6,8 @@
 
 Grip-intent classification from real two-channel muscle (EMG) recordings: it explains every decision exactly, adapts to each wearer from a few repetitions, and refuses to move the hand when the signal or its own confidence cannot be trusted.
 
+**Live demo: [neurogrip-ai.onrender.com](https://neurogrip-ai.onrender.com)** (free tier: the first load can take about a minute while it wakes)
+
 [![CI](https://github.com/NeerajGupta18/NeuroGrip-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/NeerajGupta18/NeuroGrip-ai/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
