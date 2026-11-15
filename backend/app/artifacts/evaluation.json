@@ -1,0 +1,347 @@
+{
+  "dataset": {
+    "name": "sEMG for Basic Hand movements (UCI id 313)",
+    "license": "CC BY 4.0",
+    "wearers": 5,
+    "grasps": 6,
+    "recordings_per_grasp": 30,
+    "recording_seconds": 6.0,
+    "sample_rate_hz": 500,
+    "channels": 2,
+    "window_seconds": 0.5,
+    "step_seconds": 0.25,
+    "windows_per_recording": 23,
+    "chance_accuracy": 16.7
+  },
+  "within_wearer": {
+    "per_wearer": {
+      "wearer_a": {
+        "window": 86.4,
+        "recording": 91.7
+      },
+      "wearer_b": {
+        "window": 73.7,
+        "recording": 94.4
+      },
+      "wearer_c": {
+        "window": 83.2,
+        "recording": 91.7
+      },
+      "wearer_d": {
+        "window": 87.6,
+        "recording": 97.8
+      },
+      "wearer_e": {
+        "window": 95.9,
+        "recording": 100.0
+      }
+    },
+    "window": 85.4,
+    "recording": 95.1,
+    "confusion_matrix": {
+      "grasps": [
+        "cyl",
+        "hook",
+        "tip",
+        "palm",
+        "spher",
+        "lat"
+      ],
+      "rows_true_cols_predicted": [
+        [
+          145,
+          0,
+          0,
+          1,
+          4,
+          0
+        ],
+        [
+          0,
+          149,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          135,
+          3,
+          0,
+          12
+        ],
+        [
+          0,
+          0,
+          4,
+          145,
+          0,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          148,
+          0
+        ],
+        [
+          0,
+          0,
+          7,
+          9,
+          0,
+          134
+        ]
+      ]
+    }
+  },
+  "unseen_wearer_no_calibration": {
+    "per_wearer": {
+      "wearer_a": {
+        "window": 33.4,
+        "recording": 34.4
+      },
+      "wearer_b": {
+        "window": 20.3,
+        "recording": 19.4
+      },
+      "wearer_c": {
+        "window": 43.5,
+        "recording": 44.4
+      },
+      "wearer_d": {
+        "window": 25.4,
+        "recording": 27.8
+      },
+      "wearer_e": {
+        "window": 19.5,
+        "recording": 21.7
+      }
+    },
+    "window": 28.4,
+    "recording": 29.5
+  },
+  "calibration_curve": {
+    "prior_windows": 5.0,
+    "reps_per_grasp": {
+      "0": {
+        "per_wearer": {
+          "wearer_a": 34.4,
+          "wearer_b": 19.4,
+          "wearer_c": 44.4,
+          "wearer_d": 27.8,
+          "wearer_e": 21.7
+        },
+        "recording": 29.5
+      },
+      "1": {
+        "per_wearer": {
+          "wearer_a": 81.6,
+          "wearer_b": 80.4,
+          "wearer_c": 79.6,
+          "wearer_d": 89.6,
+          "wearer_e": 93.0
+        },
+        "recording": 84.8
+      },
+      "2": {
+        "per_wearer": {
+          "wearer_a": 85.0,
+          "wearer_b": 89.4,
+          "wearer_c": 83.4,
+          "wearer_d": 94.7,
+          "wearer_e": 96.2
+        },
+        "recording": 89.7
+      },
+      "3": {
+        "per_wearer": {
+          "wearer_a": 87.3,
+          "wearer_b": 91.1,
+          "wearer_c": 87.0,
+          "wearer_d": 95.8,
+          "wearer_e": 97.1
+        },
+        "recording": 91.7
+      },
+      "5": {
+        "per_wearer": {
+          "wearer_a": 89.0,
+          "wearer_b": 93.9,
+          "wearer_c": 89.4,
+          "wearer_d": 97.5,
+          "wearer_e": 98.5
+        },
+        "recording": 93.7
+      },
+      "10": {
+        "per_wearer": {
+          "wearer_a": 89.7,
+          "wearer_b": 95.6,
+          "wearer_c": 88.4,
+          "wearer_d": 97.7,
+          "wearer_e": 99.4
+        },
+        "recording": 94.2
+      }
+    }
+  },
+  "prior_strength_study": {
+    "0.5": {
+      "1": 84.5,
+      "3": 92.0,
+      "10": 94.6
+    },
+    "5.0": {
+      "1": 82.8,
+      "3": 92.5,
+      "10": 93.9
+    },
+    "50.0": {
+      "1": 52.5,
+      "3": 74.7,
+      "10": 91.0
+    },
+    "250.0": {
+      "1": 34.9,
+      "3": 45.5,
+      "10": 67.9
+    }
+  },
+  "confidence": {
+    "after_reps": 3,
+    "evidence_scale": {
+      "wearer_a": 5.75,
+      "wearer_b": 4.5,
+      "wearer_c": 5.5,
+      "wearer_d": 4.75,
+      "wearer_e": 4.75
+    },
+    "abstention": [
+      {
+        "confidence_floor": 0.0,
+        "acted_on": 100.0,
+        "accuracy_when_acting": 91.1
+      },
+      {
+        "confidence_floor": 0.5,
+        "acted_on": 98.2,
+        "accuracy_when_acting": 91.9
+      },
+      {
+        "confidence_floor": 0.6,
+        "acted_on": 92.7,
+        "accuracy_when_acting": 94.0
+      },
+      {
+        "confidence_floor": 0.7,
+        "acted_on": 86.7,
+        "accuracy_when_acting": 95.6
+      },
+      {
+        "confidence_floor": 0.8,
+        "acted_on": 79.2,
+        "accuracy_when_acting": 96.9
+      },
+      {
+        "confidence_floor": 0.9,
+        "acted_on": 68.4,
+        "accuracy_when_acting": 98.1
+      }
+    ],
+    "reliability": [
+      {
+        "confidence_range": [
+          0,
+          0.5
+        ],
+        "share": 1.8,
+        "mean_confidence": 45.1,
+        "accuracy": 46.7
+      },
+      {
+        "confidence_range": [
+          0.5,
+          0.7
+        ],
+        "share": 11.5,
+        "mean_confidence": 60.2,
+        "accuracy": 63.8
+      },
+      {
+        "confidence_range": [
+          0.7,
+          0.9
+        ],
+        "share": 18.3,
+        "mean_confidence": 81.1,
+        "accuracy": 86.4
+      },
+      {
+        "confidence_range": [
+          0.9,
+          0.99
+        ],
+        "share": 25.0,
+        "mean_confidence": 95.6,
+        "accuracy": 96.0
+      },
+      {
+        "confidence_range": [
+          0.99,
+          1.0
+        ],
+        "share": 43.4,
+        "mean_confidence": 99.9,
+        "accuracy": 99.3
+      }
+    ]
+  },
+  "safety_gate": {
+    "clean_recordings": 900,
+    "false_alarm_rate": 0.1,
+    "false_alarms": 1,
+    "injected_fault_detection": {
+      "dropout": 100.0,
+      "spike": 100.0,
+      "hum": 100.0
+    },
+    "note": "Thresholds for each wearer are set from the other four wearers only. Faults are synthetic; detection rates are a sanity check, the false-alarm rate is the real test."
+  },
+  "day_to_day_drift": {
+    "same_day": 78.3,
+    "male_day_2": {
+      "no_recalibration": 44.3,
+      "recalibrated_3_reps": 70.8,
+      "recalibrated_10_reps": 70.2
+    },
+    "male_day_3": {
+      "no_recalibration": 43.3,
+      "recalibrated_3_reps": 66.5,
+      "recalibrated_10_reps": 67.0
+    }
+  },
+  "baselines": {
+    "Logistic regression": {
+      "within_wearer_window": 88.3,
+      "unseen_wearer_window": 26.4
+    },
+    "SVM (RBF)": {
+      "within_wearer_window": 91.1,
+      "unseen_wearer_window": 26.3
+    },
+    "Random forest": {
+      "within_wearer_window": 89.6,
+      "unseen_wearer_window": 26.4
+    },
+    "Gaussian shared-covariance (deployed)": {
+      "within_wearer_window": 85.4,
+      "unseen_wearer_window": 28.4
+    }
+  },
+  "latency_ms_per_recording": 1.33
+}

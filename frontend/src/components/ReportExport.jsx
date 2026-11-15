@@ -1,52 +1,49 @@
 import { useState } from "react";
 import { getReport } from "../api.js";
 
-const INTENT_LABELS = {
-  grasp: "Grasp",
-  release: "Release",
-  hold_firm: "Hold-Firm",
-  gentle_hold: "Hold-Gentle",
-  pinch: "Pinch",
-};
-
-function formatReport(report) {
+function formatReport(report, graspLabels, sourceLabels) {
+  const pctOrDash = (v) => (v === null || v === undefined ? "-" : `${v}%`);
   const lines = [];
-  lines.push("NEUROGRIP AI — SESSION REPORT");
-  lines.push("=".repeat(40));
-  lines.push(`User:            ${report.user_id}`);
-  lines.push(`Generated:       ${new Date(report.generated_at).toLocaleString()}`);
+  lines.push("NEUROGRIP AI - SESSION REPORT");
+  lines.push("=".repeat(46));
+  lines.push(`Profile:               ${report.user_id}`);
+  lines.push(`Signal source:         ${sourceLabels[report.source] || report.source}`);
+  lines.push(`Generated:             ${new Date(report.generated_at).toLocaleString()}`);
   lines.push("");
-  lines.push("CALIBRATION SUMMARY");
-  lines.push("-".repeat(40));
-  lines.push(`Confirmed sessions:    ${report.session_count}`);
-  lines.push(`Overall accuracy:      ${report.overall_accuracy}%`);
-  lines.push("");
-  lines.push("Accuracy trend (running, per confirmed session):");
-  lines.push(`  ${report.accuracy_history.join("% -> ")}${report.accuracy_history.length ? "%" : "(no confirmed sessions yet)"}`);
-  lines.push("");
-  lines.push("GRIP INTENT DISTRIBUTION (confirmed sessions)");
-  lines.push("-".repeat(40));
-  Object.entries(report.intent_distribution).forEach(([intent, count]) => {
-    lines.push(`  ${(INTENT_LABELS[intent] || intent).padEnd(14)} ${count}`);
+  lines.push("CALIBRATION");
+  lines.push("-".repeat(46));
+  lines.push(`Grasps calibrated:     ${report.calibrated_grasps} of ${Object.keys(report.recordings_learned).length}`);
+  Object.entries(report.recordings_learned).forEach(([g, n]) => {
+    lines.push(`  ${(graspLabels[g] || g).padEnd(14)} ${n} recording${n === 1 ? "" : "s"} learned`);
   });
   lines.push("");
-  lines.push(
-    "Note: generated from a simulated-signal prototype, not a hardware-connected"
-  );
-  lines.push("device. Intended to demonstrate the reporting layer a clinician or");
-  lines.push("caregiver would use to review a remote rehabilitation session.");
+  lines.push("ACCURACY (each recording predicted before it was learned from)");
+  lines.push("-".repeat(46));
+  lines.push(`Recordings confirmed:  ${report.recordings_confirmed}`);
+  lines.push(`Overall accuracy:      ${pctOrDash(report.overall_accuracy)}`);
+  lines.push(`Last ${report.rolling_window} recordings:    ${pctOrDash(report.recent_accuracy)}`);
+  lines.push(`When the agent acted:  ${pctOrDash(report.accuracy_when_acting)}`);
+  lines.push(`Abstained:             ${report.abstained}`);
+  lines.push("");
+  lines.push("EXPECTED (offline evaluation, recordings per grasp -> accuracy)");
+  lines.push("-".repeat(46));
+  Object.entries(report.expected_accuracy_by_reps).forEach(([reps, acc]) => {
+    lines.push(`  ${String(reps).padStart(2)} -> ${acc}%`);
+  });
+  lines.push("");
+  lines.push("Recordings replayed from the UCI 'sEMG for Basic Hand movements'");
+  lines.push("dataset (CC BY 4.0). Research prototype, not a medical device.");
   return lines.join("\n");
 }
 
-export default function ReportExport({ userId }) {
+export default function ReportExport({ userId, graspLabels, sourceLabels }) {
   const [status, setStatus] = useState("idle"); // idle | loading | error
 
   const handleExport = async () => {
     setStatus("loading");
     try {
       const report = await getReport(userId);
-      const text = formatReport(report);
-      const blob = new Blob([text], { type: "text/plain" });
+      const blob = new Blob([formatReport(report, graspLabels, sourceLabels)], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -56,7 +53,7 @@ export default function ReportExport({ userId }) {
       a.remove();
       URL.revokeObjectURL(url);
       setStatus("idle");
-    } catch (err) {
+    } catch {
       setStatus("error");
     }
   };

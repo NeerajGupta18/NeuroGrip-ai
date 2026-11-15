@@ -1,86 +1,96 @@
 """
 anomaly.py
 
-Safety layer for NeuroGrip AI. Real bionic hands have to know when their own
-sensor input can't be trusted — a dropped electrode or an electrical spike
-should never be silently classified as if it were clean data. This mirrors
-the health-monitoring angle of real systems like Kawatek's RYO (e.g.
-flagging abnormal glucose readings) applied to the signal-quality domain.
+Signal-quality gate. A prosthetic hand must know when its own sensor input
+cannot be trusted, and must refuse to move on it. Three checks run on every
+channel of every recording *before* classification:
 
-Three checks run against every incoming signal window:
+  dropout  electrode lost skin contact: the trace goes flat. Real EMG never
+           gets quieter than the amplifier noise floor, so a stretch whose
+           0.1 s standard deviation falls below half the quietest block seen
+           in training data is not muscle - it is a disconnected sensor.
 
-- dropout:   a long contiguous stretch of near-zero samples, consistent
-             with an electrode losing skin contact.
-- spike:     one or more samples at an extreme amplitude, consistent with
-             motion artifact or electrical interference.
-- noisy:     overall signal variance far above anything a real contraction
-             produces, consistent with a loose or poorly-placed sensor.
+  spike    amplitude beyond anything a muscle produced in the training data:
+           motion artifact or an electrical glitch hitting the amplifier rail.
 
-Thresholds are calibrated against this project's own signal generator so
-they don't fire on any of the five legitimate grip signatures, only on
-genuinely corrupted windows.
+  hum      50 Hz mains interference dominating the spectrum (bad grounding or
+           a loose reference electrode): the share of signal power sitting in
+           the 48-52 Hz band exceeds anything seen in clean recordings.
+
+The three thresholds are *measured* from clean recordings by
+training/train.py, not hand-tuned; docs/EVALUATION.md reports the false-alarm
+rate on a person whose data was not used to set them.
+
+Every fault is "blocking": the agent abstains instead of guessing (agent.py).
 """
 
 import numpy as np
 
-DROPOUT_RUN_FRACTION = 0.15     # 15%+ of the window near-zero in one run
-DROPOUT_ZERO_THRESHOLD = 0.03
-SPIKE_AMPLITUDE_THRESHOLD = 1.8  # no legitimate signature exceeds ~1.2
-ROUGHNESS_THRESHOLD = 0.55       # point-to-point jaggedness; clean signals top out ~0.35
+from .features import CHANNELS, SAMPLE_RATE
+
+BLOCK = 50                    # 0.1 s blocks for the flatline check
+MIN_DROPOUT_SECONDS = 0.3
+HUM_BAND = (48.0, 52.0)       # Hz
 
 
-def _longest_zero_run(signal: np.ndarray, threshold: float) -> int:
-    is_near_zero = np.abs(signal) < threshold
+def channel_stats(x: np.ndarray) -> dict:
+    """Quality statistics for one channel (1-D array)."""
+    x = np.asarray(x, dtype=float)
+    x = x - np.median(x)
+
+    n_blocks = len(x) // BLOCK
+    block_std = x[: n_blocks * BLOCK].reshape(n_blocks, BLOCK).std(axis=1)
+
+    spectrum = np.abs(np.fft.rfft(x)) ** 2
+    freqs = np.fft.rfftfreq(len(x), 1 / SAMPLE_RATE)
+    in_band = (freqs >= HUM_BAND[0]) & (freqs <= HUM_BAND[1])
+    total = spectrum[freqs >= 5].sum()
+    hum_fraction = float(spectrum[in_band].sum() / total) if total > 0 else 0.0
+
+    return {"block_std": block_std, "peak": float(np.abs(x).max()), "hum_fraction": hum_fraction}
+
+
+def _longest_run(flags: np.ndarray) -> int:
     longest = current = 0
-    for flag in is_near_zero:
+    for flag in flags:
         current = current + 1 if flag else 0
         longest = max(longest, current)
     return longest
 
 
-def detect_anomalies(signal: list[float]) -> list[dict]:
-    x = np.asarray(signal, dtype=float)
-    n = len(x)
+def detect_anomalies(signal: np.ndarray, thresholds: dict) -> list[dict]:
+    """signal: (T, 2). thresholds: {"flat_std", "peak", "hum_fraction"}."""
+    signal = np.asarray(signal, dtype=float)
     anomalies = []
+    for idx, channel in enumerate(CHANNELS):
+        stats = channel_stats(signal[:, idx])
 
-    longest_run = _longest_zero_run(x, DROPOUT_ZERO_THRESHOLD)
-    if longest_run / n >= DROPOUT_RUN_FRACTION:
-        anomalies.append({
-            "type": "dropout",
-            "severity": "high",
-            "message": (
-                f"Sensor dropout suspected: {longest_run} consecutive near-zero "
-                f"samples ({round(100 * longest_run / n)}% of the window). "
-                "Check electrode contact before trusting this prediction."
-            ),
-        })
+        flat_seconds = _longest_run(stats["block_std"] < thresholds["flat_std"]) * BLOCK / SAMPLE_RATE
+        if flat_seconds >= MIN_DROPOUT_SECONDS:
+            anomalies.append({
+                "type": "dropout", "channel": channel, "severity": "high",
+                "message": (
+                    f"Sensor dropout on {channel}: the signal sat below the amplifier noise floor "
+                    f"for {flat_seconds:.1f} s. Check electrode contact."
+                ),
+            })
 
-    max_abs = float(np.max(np.abs(x)))
-    if max_abs >= SPIKE_AMPLITUDE_THRESHOLD:
-        anomalies.append({
-            "type": "spike",
-            "severity": "high",
-            "message": (
-                f"Signal spike detected: peak amplitude reached {round(max_abs, 2)}, "
-                "well outside the range of a normal contraction. Likely motion "
-                "artifact or electrical interference."
-            ),
-        })
+        if stats["peak"] > thresholds["peak"]:
+            anomalies.append({
+                "type": "spike", "channel": channel, "severity": "high",
+                "message": (
+                    f"Amplitude spike on {channel}: peak {stats['peak']:.1f} exceeds the largest "
+                    f"muscle activation seen in training ({thresholds['peak']:.1f}). "
+                    "Likely motion artifact or electrical glitch."
+                ),
+            })
 
-    # "Roughness" (mean absolute second difference) separates independent
-    # sample-to-sample noise from smooth carrier oscillation much more
-    # reliably than raw variance, which a strong-but-clean contraction can
-    # also produce.
-    roughness = float(np.mean(np.abs(np.diff(x, n=2))))
-    if roughness >= ROUGHNESS_THRESHOLD:
-        anomalies.append({
-            "type": "noisy",
-            "severity": "medium",
-            "message": (
-                f"Unusually jagged, high-frequency noise detected (roughness "
-                f"{round(roughness, 3)}) — consistent with a loose or poorly-placed "
-                "sensor rather than a genuine muscle contraction."
-            ),
-        })
-
+        if stats["hum_fraction"] > thresholds["hum_fraction"]:
+            anomalies.append({
+                "type": "hum", "channel": channel, "severity": "high",
+                "message": (
+                    f"Mains interference on {channel}: {100 * stats['hum_fraction']:.0f}% of signal "
+                    "power sits at 50 Hz. Check grounding / reference electrode."
+                ),
+            })
     return anomalies

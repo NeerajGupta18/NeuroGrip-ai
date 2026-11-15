@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import SignalChart from "./components/SignalChart.jsx";
 import GripDisplay from "./components/GripDisplay.jsx";
 import ReasoningPanel from "./components/ReasoningPanel.jsx";
@@ -6,110 +6,133 @@ import CalibrationChart from "./components/CalibrationChart.jsx";
 import AnomalyBanner from "./components/AnomalyBanner.jsx";
 import UserSwitcher from "./components/UserSwitcher.jsx";
 import ReportExport from "./components/ReportExport.jsx";
-import { generateSignal, predict, sendFeedback, getProfile, listUsers } from "./api.js";
-
-const INTENT_OPTIONS = [
-  { key: "grasp", label: "Grasp" },
-  { key: "release", label: "Release" },
-  { key: "hold_firm", label: "Hold-Firm" },
-  { key: "gentle_hold", label: "Hold-Gentle" },
-  { key: "pinch", label: "Pinch" },
-];
-
-const ANOMALY_OPTIONS = [
-  { key: null, label: "Clean signal" },
-  { key: "dropout", label: "Simulate dropout" },
-  { key: "spike", label: "Simulate spike" },
-  { key: "noisy", label: "Simulate noisy sensor" },
-];
+import EvaluationPanel from "./components/EvaluationPanel.jsx";
+import {
+  calibrate,
+  createUser,
+  getEvaluation,
+  getMeta,
+  getProfile,
+  listUsers,
+  nextSignal,
+  predict,
+  resetProfile,
+  sendFeedback,
+} from "./api.js";
 
 const DEFAULT_USER = "demo_user";
+const FAULT_LABELS = { dropout: "Electrode dropout", spike: "Amplitude spike", hum: "50 Hz mains hum" };
 
 export default function App() {
+  const [meta, setMeta] = useState(null);
+  const [evaluation, setEvaluation] = useState(null);
   const [userId, setUserId] = useState(DEFAULT_USER);
-  const [users, setUsers] = useState([DEFAULT_USER]);
-  const [signal, setSignal] = useState(null);
-  const [trueIntent, setTrueIntent] = useState(null);
-  const [injectAnomaly, setInjectAnomaly] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [recording, setRecording] = useState(null);
+  const [fault, setFault] = useState(null);
   const [prediction, setPrediction] = useState(null);
-  const [profile, setProfile] = useState({
-    session_count: 0,
-    accuracy_history: [],
-    intent_distribution: {},
-  });
-  const [status, setStatus] = useState("idle"); // idle | loading | error
+  const [profile, setProfile] = useState(null);
+  const [status, setStatus] = useState("loading"); // idle | loading | error
   const [errorMsg, setErrorMsg] = useState("");
-  const [feedbackGiven, setFeedbackGiven] = useState(false);
+  const [notice, setNotice] = useState("");
 
-  const runCycle = useCallback(async (forUserId, anomaly = null) => {
+  const grasps = meta?.grasps || [];
+  const graspLabels = useMemo(
+    () => Object.fromEntries(grasps.map((g) => [g.key, g.label])),
+    [grasps]
+  );
+  const sourceLabels = useMemo(
+    () => Object.fromEntries((meta?.sources || []).map((s) => [s.key, s.label])),
+    [meta]
+  );
+
+  const fail = (err) => {
+    setStatus("error");
+    setErrorMsg(err.message || "Something went wrong talking to the API.");
+  };
+
+  const runCycle = useCallback(async (forUser, withFault) => {
     setStatus("loading");
     setErrorMsg("");
-    setFeedbackGiven(false);
+    setNotice("");
     try {
-      const gen = await generateSignal(null, anomaly);
-      setSignal(gen.signal);
-      setTrueIntent(gen.true_intent);
-      const pred = await predict(gen.signal, forUserId);
-      setPrediction(pred);
+      const rec = await nextSignal(forUser, withFault);
+      setRecording(rec);
+      setPrediction(await predict(forUser, rec));
       setStatus("idle");
     } catch (err) {
-      setStatus("error");
-      setErrorMsg(err.message || "Something went wrong talking to the backend.");
+      fail(err);
     }
   }, []);
 
-  const refreshProfile = useCallback(async (forUserId) => {
+  const refresh = useCallback(async (forUser) => {
     try {
-      const p = await getProfile(forUserId);
-      setProfile(p);
-    } catch {
-      // Non-fatal — calibration chart just stays at its last known state.
-    }
-  }, []);
-
-  const refreshUsers = useCallback(async () => {
-    try {
-      const res = await listUsers();
-      setUsers(res.users.length > 0 ? res.users : [DEFAULT_USER]);
-    } catch {
-      // Non-fatal — switcher just shows the default user.
+      setProfile(await getProfile(forUser)); // creates the profile on first use
+      setUsers((await listUsers()).users);
+    } catch (err) {
+      fail(err);
     }
   }, []);
 
   useEffect(() => {
-    runCycle(userId, injectAnomaly);
-    refreshProfile(userId);
-    refreshUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    (async () => {
+      try {
+        const [m, e] = await Promise.all([getMeta(), getEvaluation()]);
+        setMeta(m);
+        setEvaluation(e);
+        await refresh(DEFAULT_USER);
+        await runCycle(DEFAULT_USER, null);
+      } catch (err) {
+        fail(err);
+      }
+    })();
+  }, [refresh, runCycle]);
 
-  const handleGenerateNew = () => {
-    runCycle(userId, injectAnomaly);
-  };
-
-  const handleSwitchUser = async (newUserId) => {
-    setUserId(newUserId);
-    await runCycle(newUserId, injectAnomaly);
-    await refreshProfile(newUserId);
-    refreshUsers();
-  };
-
-  const handleFeedback = async (actualIntent) => {
-    if (!signal || !prediction) return;
+  const handleSwitchUser = async (newUserId, source) => {
     try {
-      const updated = await sendFeedback({
-        userId,
-        signal,
-        predictedIntent: prediction.predicted_intent,
-        actualIntent,
-      });
-      setProfile(updated);
-      setFeedbackGiven(true);
-      refreshUsers();
+      if (source) await createUser(newUserId, source);
+      setUserId(newUserId);
+      await refresh(newUserId);
+      await runCycle(newUserId, fault);
     } catch (err) {
-      setErrorMsg(err.message || "Could not save feedback.");
+      fail(err);
     }
   };
+
+  const handleFeedback = async (actualGrasp) => {
+    if (!recording) return;
+    try {
+      const updated = await sendFeedback(userId, recording, actualGrasp);
+      setProfile(updated);
+      setNotice(updated.learned ? "Profile updated from this recording." : updated.note);
+      if (updated.learned) await runCycle(userId, fault);
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const handleCalibrate = async () => {
+    setStatus("loading");
+    try {
+      setProfile(await calibrate(userId, 1));
+      await runCycle(userId, fault);
+      setNotice("Calibrated on one more recording of each grasp.");
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      setProfile(await resetProfile(userId));
+      await runCycle(userId, fault);
+      setNotice("Profile reset to the uncalibrated population model.");
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const busy = status === "loading";
 
   return (
     <div className="app-shell">
@@ -117,105 +140,117 @@ export default function App() {
         <span className="eyebrow">NEUROGRIP AI</span>
         <h1>Teaching bionic hands to understand intent, not just signals.</h1>
         <p className="hero-sub">
-          An explainable AI pipeline that reads simulated myoelectric (muscle) signals,
-          predicts bionic-hand grip intent, adapts to each user over repeated sessions, and
-          flags its own sensor faults — a compact prototype of the reasoning layer behind
-          human-augmentation systems like Kawatek&rsquo;s RYO / INTELIHAND.
+          Grip-intent classification from real two-channel muscle (EMG) recordings. The model
+          explains every decision exactly, adapts to each wearer from a few repetitions, and
+          refuses to move the hand when the signal or its own confidence cannot be trusted.
         </p>
       </header>
 
       {status === "error" && (
-        <div className="error-banner">
-          Couldn&rsquo;t reach the backend at the configured API URL. Make sure the FastAPI
-          server is running (see README) — {errorMsg}
+        <div className="error-banner" role="alert">
+          Couldn&rsquo;t reach the API. If it is hosted on a free tier it may be waking up; wait a
+          minute and reload. ({errorMsg})
         </div>
       )}
 
-      <UserSwitcher users={users} activeUser={userId} onSwitch={handleSwitchUser} />
+      <UserSwitcher
+        users={users}
+        activeUser={userId}
+        sources={meta?.sources || []}
+        sourceLabels={sourceLabels}
+        onSwitch={handleSwitchUser}
+      />
 
       {prediction && <AnomalyBanner anomalies={prediction.anomalies} />}
 
       <main className="dashboard-grid">
-        {signal && <SignalChart signal={signal} />}
+        {recording && <SignalChart recording={recording} />}
 
-        {prediction && (
-          <GripDisplay
-            intent={prediction.predicted_intent}
-            confidence={prediction.confidence}
-          />
-        )}
+        {prediction && <GripDisplay prediction={prediction} graspLabels={graspLabels} />}
 
-        {prediction && (
-          <ReasoningPanel
-            reasoning={prediction.reasoning}
-            confidenceByIntent={prediction.confidence_by_intent}
-            features={prediction.features}
-          />
-        )}
+        {prediction && <ReasoningPanel prediction={prediction} graspLabels={graspLabels} />}
 
-        <CalibrationChart
-          accuracyHistory={profile.accuracy_history || []}
-          sessionCount={profile.session_count || 0}
-        />
+        <CalibrationChart profile={profile} evaluation={evaluation} grasps={grasps} />
       </main>
 
       <section className="control-panel">
         <div className="control-row">
           <span className="control-label mono">
-            Ground truth (simulated): <strong>{trueIntent}</strong>
+            True grasp of this recording:{" "}
+            <strong>{recording ? graspLabels[recording.true_grasp] : "…"}</strong>
+            {recording?.injected_fault && ` · injected fault: ${FAULT_LABELS[recording.injected_fault]}`}
           </span>
-          <button
-            className="btn btn-primary"
-            onClick={handleGenerateNew}
-            disabled={status === "loading"}
-          >
-            {status === "loading" ? "Generating…" : "Generate new signal"}
+          <button className="btn btn-primary" onClick={() => runCycle(userId, fault)} disabled={busy}>
+            {busy ? "Loading…" : "Next recording"}
           </button>
         </div>
 
         <div className="control-row">
-          <span className="control-label">Signal condition (for demoing the safety layer)</span>
+          <span className="control-label">Calibration: the wearer performs each grasp once more</span>
           <div className="intent-buttons">
-            {ANOMALY_OPTIONS.map((opt) => (
+            <button className="btn btn-primary" onClick={handleCalibrate} disabled={busy}>
+              Calibrate (+1 recording per grasp)
+            </button>
+            <button className="btn btn-ghost" onClick={handleReset} disabled={busy}>
+              Reset profile
+            </button>
+          </div>
+        </div>
+
+        <div className="control-row">
+          <span className="control-label">Corrupt the next recording to test the safety gate</span>
+          <div className="intent-buttons">
+            <button
+              className={`btn btn-ghost ${fault === null ? "btn-suggested" : ""}`}
+              onClick={() => setFault(null)}
+            >
+              Clean signal
+            </button>
+            {(meta?.fault_types || []).map((f) => (
               <button
-                key={opt.label}
-                className={`btn btn-ghost ${injectAnomaly === opt.key ? "btn-suggested" : ""}`}
-                onClick={() => setInjectAnomaly(opt.key)}
-                disabled={status === "loading"}
+                key={f}
+                className={`btn btn-ghost ${fault === f ? "btn-suggested" : ""}`}
+                onClick={() => setFault(f)}
               >
-                {opt.label}
+                {FAULT_LABELS[f] || f}
               </button>
             ))}
           </div>
         </div>
 
         <div className="control-row">
-          <span className="control-label">Was this the correct grip intent?</span>
+          <span className="control-label">
+            Confirm what the grasp really was (the profile learns from it, then the next recording loads)
+          </span>
           <div className="intent-buttons">
-            {INTENT_OPTIONS.map((opt) => (
+            {grasps.map((g) => (
               <button
-                key={opt.key}
-                className={`btn btn-ghost ${prediction?.predicted_intent === opt.key ? "btn-suggested" : ""}`}
-                onClick={() => handleFeedback(opt.key)}
-                disabled={!prediction || status === "loading"}
+                key={g.key}
+                title={g.description}
+                className={`btn btn-ghost ${recording?.true_grasp === g.key ? "btn-suggested" : ""}`}
+                onClick={() => handleFeedback(g.key)}
+                disabled={!recording || busy}
               >
-                {opt.label}
+                {g.label}
               </button>
             ))}
           </div>
-          {feedbackGiven && <span className="feedback-ack mono">✓ calibration updated</span>}
+          {notice && <span className="feedback-ack mono">{notice}</span>}
         </div>
 
         <div className="control-row">
-          <span className="control-label">Export a summary of this user&rsquo;s session history</span>
-          <ReportExport userId={userId} />
+          <span className="control-label">Export a summary of this wearer&rsquo;s session</span>
+          <ReportExport userId={userId} graspLabels={graspLabels} sourceLabels={sourceLabels} />
         </div>
       </section>
 
+      {evaluation && <EvaluationPanel evaluation={evaluation} />}
+
       <footer className="footer">
         <span>
-          Simulated signals — not a hardware-connected medical device. Built to demonstrate the
-          AI reasoning, safety, calibration, and reporting layers end to end.
+          Recordings are replayed from the public &ldquo;sEMG for Basic Hand movements&rdquo; dataset
+          (Sapsanis, Tzes &amp; Georgoulas, UCI, CC BY 4.0). Research prototype, not a medical device
+          and not connected to hardware.
         </span>
       </footer>
     </div>

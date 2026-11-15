@@ -1,132 +1,191 @@
+import os
+import time
 from datetime import datetime, timezone
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agent import run_agent
-from .calibration import apply_feedback, get_profile, list_profiles
-from .features import extract_features
-from .models import (
-    FeedbackRequest,
-    GenerateSignalRequest,
-    GenerateSignalResponse,
-    PredictRequest,
-    PredictResponse,
-    ProfileResponse,
-    SessionReportResponse,
-    UserListResponse,
-)
-from .signal_simulator import ANOMALY_TYPES, INTENTS, generate_signal
+from . import calibration
+from .agent import CONFIDENCE_FLOOR, feature_table, run_agent
+from .dataset import SOURCE_LABELS, SOURCES, get_recording, load_evaluation, load_model
+from .faults import FAULT_TYPES, inject_fault
+from .features import FEATURE_NAMES, SAMPLE_RATE, WINDOW, extract_features
+from .model import GRASP_DESCRIPTIONS, GRASP_LABELS, GRASPS
+from .models import (CalibrateRequest, CreateUserRequest, FeedbackRequest, NextSignalRequest,
+                     NextSignalResponse, PredictRequest, PredictResponse, ProfileResponse,
+                     SessionReportResponse, UserListResponse)
 
 app = FastAPI(
     title="NeuroGrip AI",
     description=(
-        "Explainable AI pipeline that interprets simulated myoelectric "
-        "(muscle) signals into bionic hand grip intent, with per-user "
-        "adaptive calibration and signal-quality safety checks."
+        "Explainable grip-intent classification from real two-channel surface EMG, "
+        "with per-wearer calibration and a safety gate that abstains on bad signals."
     ),
-    version="0.2.0",
+    version="1.0.0",
 )
 
-# Wide open CORS since this is a local demo project, not a production deployment.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Comma-separated list of allowed frontend origins; "*" only for local development.
+origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
+                   allow_headers=["Content-Type"])
 
 
-def _profile_to_response(p: dict) -> ProfileResponse:
-    return ProfileResponse(
-        user_id=p["user_id"],
-        session_count=p["session_count"],
-        total_count=p["total_count"],
-        correct_count=p["correct_count"],
-        accuracy_history=p["accuracy_history"],
-        intent_distribution=p["intent_distribution"],
+def _to_array(ch1: list, ch2: list) -> np.ndarray:
+    if len(ch1) != len(ch2):
+        raise HTTPException(status_code=400, detail="ch1 and ch2 must have the same length")
+    if len(ch1) < WINDOW:
+        raise HTTPException(status_code=400, detail=f"signal needs at least {WINDOW} samples per channel")
+    signal = np.column_stack([ch1, ch2]).astype(float)
+    if not np.isfinite(signal).all():
+        raise HTTPException(status_code=400, detail="signal contains non-finite values")
+    return signal
+
+
+def _check_grasp(grasp: str) -> None:
+    if grasp not in GRASPS:
+        raise HTTPException(status_code=400, detail=f"grasp must be one of {GRASPS}")
+
+
+def _predict_response(result: dict, latency_ms: float) -> PredictResponse:
+    p = result.get("prediction")
+    return PredictResponse(
+        decision=result["decision"],
+        abstain_reason=result.get("abstain_reason"),
+        predicted_grasp=p.grasp if p else None,
+        runner_up=p.runner_up if p else None,
+        confidence=p.confidence if p else None,
+        confidence_floor=CONFIDENCE_FLOOR,
+        confidence_by_grasp=p.confidence_by_grasp if p else {},
+        window_votes=p.window_votes if p else [],
+        contributions=feature_table(p) if p else [],
+        reasoning=result["reasoning"],
+        reasoning_source=result["reasoning_source"],
+        anomalies=result.get("anomalies", []),
+        latency_ms=round(latency_ms, 2),
     )
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "intents": INTENTS, "anomaly_types": ANOMALY_TYPES}
+    return {"status": "ok", "version": app.version}
 
 
-@app.post("/api/signal/generate", response_model=GenerateSignalResponse)
-def generate(req: GenerateSignalRequest):
-    if req.intent is not None and req.intent not in INTENTS:
-        raise HTTPException(status_code=400, detail=f"intent must be one of {INTENTS}")
-    if req.inject_anomaly is not None and req.inject_anomaly not in ANOMALY_TYPES:
-        raise HTTPException(status_code=400, detail=f"inject_anomaly must be one of {ANOMALY_TYPES}")
-    result = generate_signal(intent=req.intent, seed=req.seed, inject_anomaly=req.inject_anomaly)
-    return GenerateSignalResponse(
-        signal=result["signal"],
-        true_intent=result["intent"],
-        window_size=result["window_size"],
-        injected_anomaly=result["injected_anomaly"],
+@app.get("/api/meta")
+def meta():
+    """Static description of the model and data, for the dashboard."""
+    return {
+        "grasps": [{"key": g, "label": GRASP_LABELS[g], "description": GRASP_DESCRIPTIONS[g]} for g in GRASPS],
+        "sources": [{"key": s, "label": SOURCE_LABELS[s]} for s in SOURCES],
+        "fault_types": FAULT_TYPES,
+        "feature_names": FEATURE_NAMES,
+        "sample_rate": SAMPLE_RATE,
+        "confidence_floor": CONFIDENCE_FLOOR,
+        "window_samples": load_model()["window"],
+    }
+
+
+@app.get("/api/evaluation")
+def evaluation():
+    """The offline evaluation produced by training/train.py."""
+    return load_evaluation()
+
+
+@app.get("/api/users", response_model=UserListResponse)
+def users():
+    return UserListResponse(users=calibration.list_profiles())
+
+
+@app.post("/api/users", response_model=ProfileResponse)
+def create_user(req: CreateUserRequest):
+    if req.source is not None and req.source not in SOURCES:
+        raise HTTPException(status_code=400, detail=f"source must be one of {SOURCES}")
+    return calibration.summarise(calibration.create_profile(req.user_id, req.source))
+
+
+@app.get("/api/profile/{user_id}", response_model=ProfileResponse)
+def profile(user_id: str):
+    return calibration.summarise(calibration.get_profile(user_id))
+
+
+@app.post("/api/profile/{user_id}/reset", response_model=ProfileResponse)
+def reset(user_id: str):
+    return calibration.summarise(calibration.reset_profile(user_id))
+
+
+@app.post("/api/signal/next", response_model=NextSignalResponse)
+def next_signal(req: NextSignalRequest):
+    """Serve the wearer's next unseen real recording, optionally corrupted with a sensor fault."""
+    if req.grasp is not None:
+        _check_grasp(req.grasp)
+    if req.inject_fault is not None and req.inject_fault not in FAULT_TYPES:
+        raise HTTPException(status_code=400, detail=f"inject_fault must be one of {FAULT_TYPES}")
+    prof = calibration.get_profile(req.user_id)
+    grasp, index = calibration.next_recording(prof, req.grasp)
+    signal = get_recording(prof["source"], grasp, index)
+    if req.inject_fault:
+        signal = inject_fault(signal, req.inject_fault)
+    return NextSignalResponse(
+        user_id=prof["user_id"], source=prof["source"], true_grasp=grasp, recording_index=index,
+        sample_rate=SAMPLE_RATE, injected_fault=req.inject_fault,
+        ch1=np.round(signal[:, 0], 4).tolist(), ch2=np.round(signal[:, 1], 4).tolist(),
     )
 
 
 @app.post("/api/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    if len(req.signal) < 10:
-        raise HTTPException(status_code=400, detail="signal window too short")
-    result = run_agent(signal=req.signal, user_id=req.user_id)
-    return PredictResponse(
-        predicted_intent=result["predicted_intent"],
-        confidence=result["confidence"],
-        confidence_by_intent=result["confidence_by_intent"],
-        features=result["features"],
-        reasoning=result["reasoning"],
-        anomalies=result.get("anomalies", []),
-    )
+    """Run the decision graph on a two-channel recording."""
+    signal = _to_array(req.ch1, req.ch2)
+    prof = calibration.get_profile(req.user_id)
+    start = time.perf_counter()
+    result = run_agent(signal, prof)
+    return _predict_response(result, 1000 * (time.perf_counter() - start))
 
 
 @app.post("/api/feedback", response_model=ProfileResponse)
 def feedback(req: FeedbackRequest):
-    if req.actual_intent not in INTENTS:
-        raise HTTPException(status_code=400, detail=f"actual_intent must be one of {INTENTS}")
-    features = extract_features(req.signal)
-    profile = apply_feedback(
-        user_id=req.user_id,
-        features=features,
-        predicted_intent=req.predicted_intent,
-        actual_intent=req.actual_intent,
-    )
-    return _profile_to_response(profile)
+    """Confirm what the grasp really was. The server re-runs the prediction itself (so the logged
+    outcome cannot be spoofed by the client), logs it, then learns from the recording - unless the
+    recording is corrupted, in which case nothing is learned."""
+    _check_grasp(req.actual_grasp)
+    signal = _to_array(req.ch1, req.ch2)
+    prof = calibration.get_profile(req.user_id)
+    result = run_agent(signal, prof)
+    if result.get("anomalies"):
+        summary = calibration.summarise(prof)
+        return ProfileResponse(**summary, learned=False,
+                               note="Recording has a sensor fault; it was not used for calibration.")
+    p = result["prediction"]
+    prof = calibration.learn(prof, extract_features(signal), req.actual_grasp, p.grasp,
+                             abstained=result["decision"] == "abstain", confidence=p.confidence)
+    return ProfileResponse(**calibration.summarise(prof), learned=True)
 
 
-@app.get("/api/profile/{user_id}", response_model=ProfileResponse)
-def profile(user_id: str):
-    p = get_profile(user_id)
-    return _profile_to_response(p)
-
-
-@app.get("/api/users", response_model=UserListResponse)
-def users():
-    """List every user_id with a saved calibration profile, for the
-    multi-user profile switcher in the UI."""
-    return UserListResponse(users=list_profiles())
+@app.post("/api/calibrate", response_model=ProfileResponse)
+def calibrate(req: CalibrateRequest):
+    """Guided calibration: the wearer performs every grasp `reps` times. Each recording is
+    predicted first (and scored), then learned from."""
+    prof = calibration.get_profile(req.user_id)
+    for _ in range(req.reps):
+        for grasp in GRASPS:
+            g, index = calibration.next_recording(prof, grasp)
+            signal = get_recording(prof["source"], g, index)
+            result = run_agent(signal, prof)
+            if result.get("anomalies"):
+                continue
+            p = result["prediction"]
+            prof = calibration.learn(prof, extract_features(signal), g, p.grasp,
+                                     abstained=result["decision"] == "abstain", confidence=p.confidence)
+    return ProfileResponse(**calibration.summarise(prof), learned=True)
 
 
 @app.get("/api/report/{user_id}", response_model=SessionReportResponse)
 def report(user_id: str):
-    """Return a summarized session report for a user — accuracy trend and
-    grip-intent distribution — the data behind the frontend's downloadable
-    report, aimed at the same audience a clinician reviewing a remote
-    rehabilitation session would be."""
-    p = get_profile(user_id)
-    overall_accuracy = (
-        round(100 * p["correct_count"] / p["total_count"], 1) if p["total_count"] else 0.0
-    )
+    """Session summary for a clinician reviewing a fitting session, next to the accuracy the
+    offline evaluation says to expect for that amount of calibration."""
+    summary = calibration.summarise(calibration.get_profile(user_id))
+    curve = load_evaluation()["calibration_curve"]["reps_per_grasp"]
     return SessionReportResponse(
-        user_id=p["user_id"],
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        session_count=p["session_count"],
-        total_count=p["total_count"],
-        correct_count=p["correct_count"],
-        overall_accuracy=overall_accuracy,
-        accuracy_history=p["accuracy_history"],
-        intent_distribution=p["intent_distribution"],
+        **summary, generated_at=datetime.now(timezone.utc).isoformat(),
+        expected_accuracy_by_reps={reps: v["recording"] for reps, v in curve.items()},
     )

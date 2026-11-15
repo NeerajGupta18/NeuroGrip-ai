@@ -517,3 +517,241 @@ a:focus-visible {
 .export-error {
   color: var(--red);
 }
+
+/* ---------- v1.0: real-signal dashboard ---------- */
+
+.signal-row {
+  position: relative;
+}
+
+.signal-row-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 11px;
+  z-index: 1;
+}
+
+.decision-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-bright);
+}
+
+.decision-act {
+  color: var(--bg);
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.decision-abstain {
+  color: var(--bg);
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
+.grip-panel-abstain .finger-fill {
+  background: var(--border-bright);
+}
+
+.abstain-reason {
+  color: var(--amber);
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+
+.grip-confidence-bar {
+  position: relative;
+}
+
+.confidence-floor-mark {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--text);
+  opacity: 0.7;
+}
+
+.vote-strip-wrap {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vote-strip {
+  display: flex;
+  gap: 2px;
+}
+
+.vote-cell {
+  flex: 1;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.vote-agree {
+  background: var(--teal);
+}
+
+.vote-differ {
+  background: var(--border-bright);
+}
+
+.latency {
+  margin-top: 10px;
+  font-size: 11px;
+}
+
+.contrib-block {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contrib-row {
+  display: grid;
+  grid-template-columns: 190px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+
+.contrib-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contrib-track {
+  position: relative;
+  height: 10px;
+  background: var(--surface-raised);
+  border-radius: 3px;
+}
+
+.contrib-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+
+.contrib-for {
+  background: var(--teal);
+}
+
+.contrib-against {
+  background: var(--amber);
+}
+
+.contrib-zero {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border-bright);
+}
+
+.contrib-value {
+  text-align: right;
+  color: var(--text);
+}
+
+.calib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.calib-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.calib-chip-on {
+  border-color: var(--teal-dim);
+  color: var(--teal);
+}
+
+.calib-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.calib-stats strong {
+  color: var(--text);
+}
+
+.calib-expected {
+  color: var(--teal);
+}
+
+.eval-panel {
+  margin-top: 28px;
+}
+
+.eval-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.eval-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.eval-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.eval-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.eval-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+select.user-add-input {
+  appearance: none;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .eval-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .contrib-row {
+    grid-template-columns: 120px 1fr 44px;
+  }
+}
+
+.decision-pill {
+  align-self: flex-start;
+}
